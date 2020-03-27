@@ -4,7 +4,7 @@ class walousql
 {
     private $path;
     private $table;
-    private $path_table;
+    private $table_path;
     private $tables = array();
 
     public function __construct($dataPath=__DIR__ . DIRECTORY_SEPARATOR . '..' . DIRECTORY_SEPARATOR . 'data' . DIRECTORY_SEPARATOR)
@@ -31,25 +31,30 @@ class walousql
         }
     }
 
+    public function getDataPath()
+    {
+        return $this->path;
+    }
+
     public function setTable($table, $force=false)
     {
         if(preg_match('`^[a-z0-9_\-\.]+$`i', $table))
         {
             $this->table = $table;
-            $this->path_table = $this->path . $table . '.table.php';
+            $this->table_path = $this->path . $table . '.table.php';
             if (!isset($this->tables[$table]) || $force)
             {
-                if (is_file($this->path_table))
+                if (is_file($this->table_path))
                 {
                     if (function_exists('opcache_invalidate') && strlen(ini_get('opcache.restrict_api')) < 1)
                     {
-                        opcache_invalidate($this->path_table, true);
+                        opcache_invalidate($this->table_path, true);
                     }
                     elseif (function_exists('apc_compile_file'))
                     {
-                        apc_compile_file($this->path_table);
+                        apc_compile_file($this->table_path);
                     }
-                    include $this->path_table;
+                    include $this->table_path;
                     $this->tables[$this->table] = $data;
                 }
                 else
@@ -71,13 +76,26 @@ class walousql
         return $this->table;
     }
 
+    public function getTablePath()
+    {
+        return $this->table_path;
+    }
+
     public function set($rows, $erase=false)
     {
         if (count($rows) > 0)
         {
             foreach ($rows as $key => $row)
             {
-                if (!isset($this->tables[$this->table][$key]) || $erase)
+                if (!isset($this->tables[$this->table][$key]))
+                {
+                    $erase = true;
+                }
+                elseif (!is_array($this->tables[$this->table][$key]))
+                {
+                    $erase = true;
+                }
+                if ($erase)
                 {
                     $this->tables[$this->table][$key] = $row;
                 }
@@ -429,15 +447,26 @@ class walousql
         return $result;
     }
 
-    public function deleteAll()
+    public function deleteAll($destroyTable=false)
     {
-        return $this->deleteByKey(array_keys($this->tables[$this->table]));
+        if ($destroyTable)
+        {
+            $result = (count($this->tables[$this->table]) !== 0);
+            $this->tables[$this->table] = array();
+            @unlink($this->table_path);
+            return $result;
+        }
+        else{
+            return $this->deleteByKey(array_keys($this->tables[$this->table]));
+        }
     }
 
     private function writeTable()
     {
         $last_keyless = false;
-        foreach (array_reverse(array_keys($this->tables[$this->table])) as $key)
+        $array_keys = array_keys($this->tables[$this->table]);
+        rsort($array_keys);
+        foreach ($array_keys as $key)
         {
             if (is_int($key))
             {
@@ -456,15 +485,15 @@ class walousql
 
         if (count($this->tables[$this->table]) === 0)
         {
-            @unlink($this->path_table);
+            @unlink($this->table_path);
         }
         elseif (function_exists('file_put_contents'))
         {
-            file_put_contents($this->path_table, '<?php'."\n".'$data = ' . var_export($this->tables[$this->table], true) . ';'."\n".'?>');
+            file_put_contents($this->table_path, '<?php'."\n".'$data = ' . var_export($this->tables[$this->table], true) . ';'."\n".'?>');
         }
         else
         {
-            $fp = fopen($this->path_table, 'w');
+            $fp = fopen($this->table_path, 'w');
             fwrite($fp, '<?php'."\n".'$data = ' . var_export($this->tables[$this->table], true) . ';'."\n".'?>', true);
             fclose($fp);
         }
